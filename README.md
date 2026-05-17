@@ -304,6 +304,57 @@ output/
 Once indexing finishes, you can ask questions. Use `query.py` (a simple wrapper)
 or the GraphRAG CLI directly.
 
+### What happens when you ask a question
+
+Querying is **not** just a database lookup — every question makes **two OpenAI API
+calls**, so you need an internet connection and your API key set:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  YOU:  "Who founded Nova AI?"                                       │
+│                                                                     │
+│         │                                                           │
+│         ▼                                                           │
+│  ┌──────────────────────────┐    ┌──────────────────────────┐       │
+│  │  1. Embed the question   │───▶│ OpenAI                   │ 🌐    │
+│  │     into a vector        │    │ text-embedding-3-small   │       │
+│  └──────────────────────────┘    └──────────────────────────┘       │
+│         │                                                           │
+│         ▼                                                           │
+│  ┌──────────────────────────┐                                       │
+│  │  2. Find similar entities│ ← reads output/*.parquet              │
+│  │     + their neighborhood │ ← reads output/lancedb/  (LOCAL)      │
+│  └──────────────────────────┘                                       │
+│         │                                                           │
+│         ▼                                                           │
+│  ┌──────────────────────────┐    ┌──────────────────────────┐       │
+│  │  3. Send context + Q     │───▶│ OpenAI                   │ 🌐    │
+│  │     to LLM for answer    │    │ gpt-4o                   │       │
+│  └──────────────────────────┘    └──────────────────────────┘       │
+│         │                                                           │
+│         ▼                                                           │
+│  ANSWER (with [Data: Entities…] citations)                          │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+| Step                  | Where it runs                         | Internet? |
+|-----------------------|----------------------------------------|-----------|
+| Embed the question    | OpenAI `text-embedding-3-small`        | ✅ yes    |
+| Vector + graph search | Your machine (parquet + LanceDB)       | ❌ local  |
+| Generate the answer   | OpenAI `gpt-4o`                        | ✅ yes    |
+
+**Cost per query** (rough): about $0.001–$0.01 for local search, $0.05–$0.20 for
+global search (which fans out across all community reports via map-reduce).
+
+> **Both `--method local` and `--method global` need the LLM.**
+> The graph data is yours and lives in `output/`, but turning it into a
+> natural-language answer requires the model. No LLM = no answer.
+
+**Fully offline alternative:** swap to a local model by editing [settings.yml](settings.yml):
+point `llm.api_base` at Ollama (`http://localhost:11434/v1`) and change `model`
+to `llama3.1:8b` or similar. Quality drops vs gpt-4o but everything runs on your
+machine. The graph stays the same — only the answering model changes.
+
 ### Using query.py
 
 ```bash
