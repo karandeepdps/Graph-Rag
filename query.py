@@ -25,8 +25,29 @@ Examples for the included sample story:
 """
 
 import argparse
+import os
+import shutil
 import subprocess
 import sys
+
+
+def _find_graphrag() -> str:
+    # Prefer graphrag on PATH (set correctly when venv is activated)
+    binary = shutil.which("graphrag")
+    if binary:
+        return binary
+    # Fallback: look in a .venv next to this script (venv not activated)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidate = os.path.join(script_dir, ".venv", "bin", "graphrag")
+    if os.path.isfile(candidate):
+        return candidate
+    sys.exit(
+        "ERROR: graphrag not found.\n"
+        "Activate the virtual environment first:\n"
+        "  source .venv/bin/activate\n"
+        "Or install graphrag:\n"
+        "  pip install graphrag"
+    )
 
 
 def main():
@@ -57,12 +78,7 @@ Decision guide — which method to pick:
     print(f"\n  Method : {args.method.upper()} SEARCH")
     print(f"  Question: {args.question}\n")
 
-    cmd = [
-        sys.executable, "-m", "graphrag.query",
-        "--root", args.root,
-        "--method", args.method,
-        args.question,
-    ]
+    cmd = [_find_graphrag(), "query", "--root", args.root, "--method", args.method, args.question]
     subprocess.run(cmd, check=True)
 
 
