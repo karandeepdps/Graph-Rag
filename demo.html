@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GraphRAG Interactive Explorer</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="demo_data.js"></script>
+  <style>
+    :root {
+      --bg:        #0d0d1a;
+      --surface:   #14142b;
+      --surface2:  #1c1c38;
+      --border:    #2a2a50;
+      --text:      #e0e0f5;
+      --dim:       #7070a0;
+      --accent:    #7c8dff;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100dvh;
+      display: grid;
+      grid-template-rows: 52px 1fr auto;
+      overflow: hidden;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────── */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center;
+      padding: 0 20px; gap: 16px;
+    }
+    header h1 {
+      font-size: 17px; font-weight: 700;
+      background: linear-gradient(120deg, var(--accent), #c07aff);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      white-space: nowrap;
+    }
+    .header-sub { font-size: 12px; color: var(--dim); }
+    .header-stats {
+      margin-left: auto; font-size: 12px; color: var(--dim);
+      display: flex; gap: 16px;
+    }
+    .stat-pill {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 20px; padding: 3px 10px;
+    }
+
+    /* ── Layout ─────────────────────────────────────────────────── */
+    .main {
+      display: grid;
+      grid-template-columns: 230px 1fr 300px;
+      overflow: hidden;
+    }
+    .sidebar {
+      background: var(--surface); padding: 14px 12px;
+      display: flex; flex-direction: column; gap: 18px;
+      overflow-y: auto;
+    }
+    .sidebar-left  { border-right: 1px solid var(--border); }
+    .sidebar-right { border-left:  1px solid var(--border); }
+
+    .section-label {
+      font-size: 10px; font-weight: 700;
+      letter-spacing: .1em; text-transform: uppercase;
+      color: var(--dim); margin-bottom: 8px;
+    }
+
+    /* Toggle */
+    .toggle-row { display: flex; background: var(--surface2); border-radius: 8px; padding: 3px; }
+    .tog {
+      flex: 1; border: none; background: transparent;
+      color: var(--dim); font-size: 12px;
+      padding: 5px 6px; border-radius: 6px;
+      cursor: pointer; transition: all .15s;
+    }
+    .tog.on { background: var(--accent); color: #fff; }
+
+    /* Community list */
+    .comm-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 8px; border-radius: 7px;
+      cursor: pointer; font-size: 12px;
+      transition: background .15s; user-select: none;
+    }
+    .comm-item:hover { background: var(--surface2); }
+    .comm-item.off   { opacity: .3; }
+    .cdot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .ctext { flex: 1; line-height: 1.3; }
+    .ctext small { color: var(--dim); font-size: 10px; display: block; }
+
+    /* Type legend */
+    .leg-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--dim); padding: 3px 0; }
+    .ldot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+    /* Pipeline steps */
+    .step-card {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 8px; border-radius: 8px; cursor: pointer;
+      border: 1px solid transparent;
+      transition: background .15s, border-color .15s;
+    }
+    .step-card:hover { background: var(--surface2); }
+    .step-card.active { background: var(--surface2); border-color: var(--accent); }
+    .step-num {
+      width: 22px; height: 22px; border-radius: 50%;
+      background: var(--accent); color: #fff;
+      font-size: 11px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .step-body strong { font-size: 12px; display: block; }
+    .step-body span   { font-size: 11px; color: var(--dim); }
+
+    /* ── Graph canvas ───────────────────────────────────────────── */
+    .canvas-wrap {
+      position: relative; overflow: hidden;
+      background:
+        radial-gradient(ellipse at 30% 40%, rgba(124,141,255,.06) 0%, transparent 60%),
+        radial-gradient(ellipse at 70% 70%, rgba(42,157,143,.04) 0%, transparent 60%),
+        var(--bg);
+    }
+    #graph-svg { width: 100%; height: 100%; display: block; }
+
+    .step-banner {
+      position: absolute; top: 14px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(20,20,43,.95);
+      border: 1px solid var(--accent);
+      border-radius: 10px; padding: 10px 18px;
+      font-size: 13px; text-align: center;
+      max-width: 460px; pointer-events: none;
+      display: none; line-height: 1.5;
+    }
+    .step-banner strong { color: var(--accent); }
+
+    .mode-badge {
+      position: absolute; bottom: 14px; left: 50%;
+      transform: translateX(-50%);
+      border-radius: 20px; padding: 4px 14px;
+      font-size: 12px; font-weight: 600;
+      pointer-events: none; display: none;
+      background: var(--surface2); border: 1px solid var(--accent); color: var(--accent);
+    }
+
+    /* Missing-data overlay */
+    .empty-state {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: 14px; padding: 40px;
+      text-align: center; color: var(--dim); font-size: 14px; line-height: 1.6;
+    }
+    .empty-state code {
+      background: var(--surface2); padding: 4px 10px; border-radius: 6px;
+      font-family: 'SF Mono', Menlo, monospace; font-size: 12px;
+      color: var(--accent); border: 1px solid var(--border);
+    }
+
+    /* ── Right detail panel ─────────────────────────────────────── */
+    .detail-empty {
+      font-size: 13px; color: var(--dim);
+      text-align: center; margin-top: 24px; line-height: 1.6;
+    }
+    .node-card, .comm-card {
+      background: var(--surface2); border-radius: 10px;
+      padding: 14px; border: 1px solid var(--border);
+    }
+    .nc-name { font-size: 15px; font-weight: 700; margin-bottom: 4px; line-height: 1.3; }
+    .nc-meta { font-size: 12px; color: var(--dim); margin-bottom: 10px; }
+    .nc-desc { font-size: 13px; line-height: 1.55; }
+    .nc-connections { margin-top: 14px; }
+    .nc-connections .section-label { margin-bottom: 8px; }
+    .chip {
+      display: inline-block;
+      background: var(--border); border-radius: 12px;
+      padding: 3px 10px; font-size: 11px; margin: 2px;
+      cursor: pointer; transition: background .15s;
+    }
+    .chip:hover { background: var(--accent); color: #fff; }
+
+    /* ── Query bar ──────────────────────────────────────────────── */
+    .query-bar {
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      padding: 12px 18px;
+      max-height: 28vh; overflow-y: auto;
+    }
+    .query-bar .section-label { margin-bottom: 10px; }
+    .query-btns {
+      display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 10px;
+    }
+    .qbtn {
+      padding: 5px 13px; border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--surface2); color: var(--text);
+      font-size: 12px; cursor: pointer; transition: all .15s;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .qbtn:hover { border-color: var(--accent); }
+    .qbtn .qdot { width: 8px; height: 8px; border-radius: 50%; }
+
+    .answer-wrap {
+      background: var(--surface2); border-radius: 8px;
+      border-left: 3px solid var(--accent);
+      padding: 12px 14px;
+      font-size: 13px; line-height: 1.65;
+      display: none; max-height: 140px; overflow-y: auto;
+    }
+    .answer-wrap.show { display: block; }
+    .answer-source { font-size: 11px; color: var(--dim); margin-bottom: 6px; }
+
+    /* ── Tooltip ────────────────────────────────────────────────── */
+    #tip {
+      position: fixed;
+      background: rgba(20,20,43,.97);
+      border: 1px solid var(--border); border-radius: 10px;
+      padding: 10px 14px; font-size: 12px; max-width: 280px;
+      pointer-events: none; z-index: 999; display: none;
+    }
+    #tip .t-name { font-weight: 700; margin-bottom: 3px; }
+    #tip .t-meta { color: var(--dim); font-size: 11px; margin-bottom: 6px; }
+    #tip .t-body { line-height: 1.45; }
+
+    /* ── D3 graph classes ───────────────────────────────────────── */
+    .glink {
+      stroke: #2a2a55; stroke-width: 1.5; fill: none;
+      transition: stroke .2s, opacity .2s;
+    }
+    .glink.lit   { stroke: rgba(255,255,255,.85) !important; stroke-width: 2.5; }
+    .glink.ghost { opacity: .06; }
+
+    .gnode circle {
+      stroke-width: 2;
+      transition: r .3s, stroke-width .2s, opacity .2s;
+      cursor: pointer;
+    }
+    .gnode text {
+      pointer-events: none; user-select: none;
+      transition: opacity .2s;
+    }
+    .gnode.lit circle   { stroke-width: 4; }
+    .gnode.ghost circle,
+    .gnode.ghost text   { opacity: .08; }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════  HEADER  ═══════ -->
+<header>
+  <h1>🕸️ GraphRAG Explorer</h1>
+  <span class="header-sub">Interactive view of your indexed knowledge graph</span>
+  <div class="header-stats" id="header-stats"></div>
+</header>
+
+<div class="main">
+
+  <!-- LEFT SIDEBAR -->
+  <div class="sidebar sidebar-left">
+
+    <div>
+      <div class="section-label">Color nodes by</div>
+      <div class="toggle-row">
+        <button class="tog on" id="tog-comm" onclick="setColorMode('community')">Community</button>
+        <button class="tog"    id="tog-type" onclick="setColorMode('type')">Type</button>
+      </div>
+    </div>
+
+    <div id="comm-section">
+      <div class="section-label">Communities</div>
+      <div id="comm-filters"></div>
+    </div>
+
+    <div id="type-section" style="display:none">
+      <div class="section-label">Entity Types</div>
+      <div id="type-legend"></div>
+    </div>
+
+    <div>
+      <div class="section-label">Pipeline Steps</div>
+      <div id="pipeline"></div>
+    </div>
+
+  </div>
+
+  <!-- GRAPH CANVAS -->
+  <div class="canvas-wrap" id="canvas-wrap">
+    <svg id="graph-svg"></svg>
+    <div class="step-banner" id="step-banner"></div>
+    <div class="mode-badge"  id="mode-badge"></div>
+  </div>
+
+  <!-- RIGHT SIDEBAR -->
+  <div class="sidebar sidebar-right">
+    <div class="section-label">Selection</div>
+    <div id="detail-panel">
+      <p class="detail-empty">
+        Click any node to explore its connections,<br>
+        or click a community button below to see GraphRAG's summary of that cluster.
+      </p>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════════════════════════════  QUERY BAR  ════ -->
+<div class="query-bar">
+  <div class="section-label">
+    Explore communities &nbsp;
+    <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--dim)">
+      — each button shows GraphRAG's auto-generated summary of that cluster (Global Search style)
+    </span>
+  </div>
+  <div class="query-btns" id="query-btns"></div>
+  <div class="answer-wrap" id="answer-wrap">
+    <div class="answer-source" id="answer-source"></div>
+    <div id="answer-text"></div>
+  </div>
+</div>
+
+<div id="tip"></div>
+
+<!-- ═══════════════════════════════════  SCRIPT  ═══════ -->
+<script>
+// ── Boot: ensure data file is loaded ──────────────────────────────────────────
+
+if (!window.GRAPH_DATA) {
+  document.getElementById("canvas-wrap").innerHTML = `
+    <div class="empty-state">
+      <div style="font-size:18px;color:var(--text)">No graph data found</div>
+      <div>
+        This demo reads <code>demo_data.js</code>, which is generated from your<br>
+        indexed graph. Generate it with:
+      </div>
+      <div><code>python build_demo.py</code></div>
+      <div>then reload this page. (You also need to have run<br>
+        <code>python -m graphrag.index --root .</code> first.)
+      </div>
+    </div>
+  `;
+  throw new Error("demo_data.js not loaded");
+}
+
+const { nodes: NODES, links: LINKS, communities: COMMUNITIES, stats: STATS } = window.GRAPH_DATA;
+
+// Color per entity type (covers GraphRAG defaults; falls back for unknowns).
+const TYPE_COLORS = {
+  organization: "#4ECDC4",
+  person:       "#FF6B6B",
+  geo:          "#95E1D3",
+  event:        "#F7DC6F",
+  technology:   "#BB8FCE",
+  product:      "#F0A500",
+  unknown:      "#888899",
+};
+// Auto-add colors for any extra entity types in the data.
+const EXTRA_TYPE_PALETTE = ["#6BCB77","#FF9F45","#9BA4B5","#FFA8A8","#D4A5FF","#7DD3FC"];
+{
+  let idx = 0;
+  for (const n of NODES) {
+    if (!TYPE_COLORS[n.t]) {
+      TYPE_COLORS[n.t] = EXTRA_TYPE_PALETTE[idx % EXTRA_TYPE_PALETTE.length];
+      idx++;
+    }
+  }
+}
+
+// Community id -> {color, title, summary}
+const COMM_BY_ID = new Map(COMMUNITIES.map(c => [c.id, c]));
+function commColor(cid) {
+  const c = COMM_BY_ID.get(cid);
+  return c ? c.color : "#666";
+}
+
+// ── Pipeline steps (static — describes GraphRAG itself) ───────────────────────
+
+const STEPS = [
+  { n:1, title:"Chunk Documents",     sub:"Split into overlapping chunks",
+    banner:"<strong>Step 1 — Chunk:</strong> Documents are split into overlapping text chunks (300 tokens, 100 overlap by default). Each chunk is processed independently next." },
+  { n:2, title:"Extract Entities",    sub:"LLM finds entities + relationships",
+    banner:"<strong>Step 2 — Extract:</strong> An LLM reads each chunk and identifies named entities (people, orgs, places, events…) and the relationships between them. This is what you see as nodes and edges." },
+  { n:3, title:"Build Graph",         sub:"Merge duplicates, connect entities",
+    banner:"<strong>Step 3 — Build:</strong> Entities mentioned across multiple chunks get merged into single nodes, and all relationships are stitched into one knowledge graph." },
+  { n:4, title:"Detect Communities",  sub:"Leiden clustering",
+    banner:"<strong>Step 4 — Communities:</strong> The Leiden algorithm finds tightly-connected clusters. Try the <em>Community</em> color toggle on the left to see them." },
+  { n:5, title:"Summarize",           sub:"One report per community",
+    banner:"<strong>Step 5 — Summarize:</strong> The LLM writes a descriptive summary for each community. Click a community button below to read the real summary GraphRAG generated for your data." },
+  { n:6, title:"Embed Everything",    sub:"Vectors enable semantic search",
+    banner:"<strong>Step 6 — Embed:</strong> Entities, relationships, and text chunks get embedded into vectors. Those power Local Search — point queries match similar entities, then traverse the graph from there." },
+];
+
+// ── State ─────────────────────────────────────────────────────────────────────
+
+let colorMode = "community";
+let visibleComms = new Set(COMMUNITIES.map(c => c.id));
+if (NODES.some(n => n.c === -1)) visibleComms.add(-1);  // unclustered bucket
+let activeStep = null;
+
+// ── Header stats ──────────────────────────────────────────────────────────────
+
+document.getElementById("header-stats").innerHTML = `
+  <span class="stat-pill">${STATS.entities} entities</span>
+  <span class="stat-pill">${STATS.relationships} relationships</span>
+  <span class="stat-pill">${STATS.communities} communities</span>
+`;
+
+// ── Community filter chips ────────────────────────────────────────────────────
+
+const commFiltersEl = document.getElementById("comm-filters");
+COMMUNITIES.forEach(c => {
+  const memberCount = NODES.filter(n => n.c === c.id).length;
+  const d = document.createElement("div");
+  d.className = "comm-item";
+  d.id = `cf-${c.id}`;
+  d.innerHTML = `
+    <div class="cdot" style="background:${c.color}"></div>
+    <div class="ctext">${c.title}<small>${memberCount} entities</small></div>
+  `;
+  d.onclick = () => toggleComm(c.id);
+  commFiltersEl.appendChild(d);
+});
+// Unclustered bucket if any nodes lack a community.
+if (NODES.some(n => n.c === -1)) {
+  const d = document.createElement("div");
+  d.className = "comm-item";
+  d.id = "cf--1";
+  const count = NODES.filter(n => n.c === -1).length;
+  d.innerHTML = `<div class="cdot" style="background:#555"></div><div class="ctext">Unclustered<small>${count} entities</small></div>`;
+  d.onclick = () => toggleComm(-1);
+  commFiltersEl.appendChild(d);
+}
+
+// ── Type legend ───────────────────────────────────────────────────────────────
+
+const typeLegendEl = document.getElementById("type-legend");
+const presentTypes = new Set(NODES.map(n => n.t));
+Object.entries(TYPE_COLORS).forEach(([k, v]) => {
+  if (!presentTypes.has(k)) return;
+  const count = NODES.filter(n => n.t === k).length;
+  const d = document.createElement("div");
+  d.className = "leg-row";
+  d.innerHTML = `<div class="ldot" style="background:${v}"></div><span>${k[0].toUpperCase()+k.slice(1)} (${count})</span>`;
+  typeLegendEl.appendChild(d);
+});
+
+// ── Pipeline cards ────────────────────────────────────────────────────────────
+
+const pipelineEl = document.getElementById("pipeline");
+STEPS.forEach(s => {
+  const d = document.createElement("div");
+  d.className = "step-card";
+  d.id = `step-${s.n}`;
+  d.innerHTML = `<div class="step-num">${s.n}</div><div class="step-body"><strong>${s.title}</strong><span>${s.sub}</span></div>`;
+  d.onclick = () => activateStep(s);
+  pipelineEl.appendChild(d);
+});
+
+// ── Community-summary query buttons (real GraphRAG data) ──────────────────────
+
+const queryBtnsEl = document.getElementById("query-btns");
+COMMUNITIES.forEach(c => {
+  if (!c.summary) return;  // skip communities with no report
+  const b = document.createElement("button");
+  b.className = "qbtn";
+  b.innerHTML = `<span class="qdot" style="background:${c.color}"></span>${c.title}`;
+  b.onclick = () => showCommunity(c.id);
+  queryBtnsEl.appendChild(b);
+});
+if (!queryBtnsEl.children.length) {
+  queryBtnsEl.innerHTML = `<span style="color:var(--dim);font-size:12px">No community reports found in output/community_reports.parquet</span>`;
+}
+
+// ── D3 setup ──────────────────────────────────────────────────────────────────
+
+const svgEl = document.getElementById("graph-svg");
+const svg = d3.select(svgEl);
+const g   = svg.append("g");
+
+const zoom = d3.zoom().scaleExtent([0.1, 5]).on("zoom", e => g.attr("transform", e.transform));
+svg.call(zoom);
+
+// Clone for D3 mutation safety. d3.forceLink requires `source`/`target` keys,
+// so rename our compact s/t/l/w into the names d3 expects.
+const nodes = NODES.map(n => ({ ...n }));
+const links = LINKS.map(l => ({ source: l.s, target: l.t, label: l.l, weight: l.w }));
+
+const deg = {};
+LINKS.forEach(l => { deg[l.s] = (deg[l.s] || 0) + 1; deg[l.t] = (deg[l.t] || 0) + 1; });
+const radius = d => 7 + Math.min((deg[d.id] || d.deg || 1) * 1.6, 22);
+
+function getColor(d) {
+  return colorMode === "community" ? commColor(d.c) : (TYPE_COLORS[d.t] || TYPE_COLORS.unknown);
+}
+
+const sim = d3.forceSimulation(nodes)
+  .force("link",      d3.forceLink(links).id(d => d.id).distance(d => 60 + Math.random() * 30).strength(0.5))
+  .force("charge",    d3.forceManyBody().strength(-220))
+  .force("center",    d3.forceCenter(0, 0))
+  .force("collision", d3.forceCollide().radius(d => radius(d) + 8))
+  .alphaDecay(0.025);
+
+const linkSel = g.append("g").selectAll("line").data(links).join("line").attr("class", "glink");
+
+const nodeSel = g.append("g").selectAll("g").data(nodes).join("g")
+  .attr("class", "gnode")
+  .call(d3.drag()
+    .on("start", (e,d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
+    .on("drag",  (e,d) => { d.fx=e.x; d.fy=e.y; })
+    .on("end",   (e,d) => { if (!e.active) sim.alphaTarget(0); d.fx=null; d.fy=null; })
+  );
+
+nodeSel.append("circle")
+  .attr("r", radius)
+  .attr("fill",   d => getColor(d))
+  .attr("stroke", d => d3.color(getColor(d)).brighter(0.6));
+
+nodeSel.append("text")
+  .text(d => d.id.length > 26 ? d.id.slice(0,24) + "…" : d.id)
+  .attr("text-anchor", "middle")
+  .attr("dy", d => -radius(d) - 5)
+  .attr("fill", "#ccd")
+  .attr("font-size", "10px");
+
+sim.on("tick", () => {
+  linkSel
+    .attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+    .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+  nodeSel.attr("transform", d => `translate(${d.x},${d.y})`);
+});
+
+// Center the view once the layout has settled a bit.
+setTimeout(() => {
+  const { clientWidth: w, clientHeight: h } = svgEl;
+  const scale = Math.min(1, 700 / Math.max(w, h)) * 0.9;
+  svg.call(zoom.transform, d3.zoomIdentity.translate(w/2, h/2).scale(scale));
+}, 900);
+
+// ── Tooltip ───────────────────────────────────────────────────────────────────
+
+const tip = document.getElementById("tip");
+nodeSel
+  .on("mouseover", (e,d) => {
+    const comm = COMM_BY_ID.get(d.c);
+    tip.style.display = "block";
+    tip.innerHTML = `
+      <div class="t-name">${d.id}</div>
+      <div class="t-meta">${d.t[0].toUpperCase()+d.t.slice(1)} · ${comm ? comm.title : "Unclustered"}</div>
+      <div class="t-body">${(d.d || "").slice(0,180)}${(d.d||"").length>180?"…":""}</div>
+    `;
+    moveTip(e);
+  })
+  .on("mousemove", moveTip)
+  .on("mouseout",  () => { tip.style.display="none"; });
+
+function moveTip(e) {
+  const x = Math.min(e.clientX+14, window.innerWidth-300);
+  const y = Math.min(e.clientY-10, window.innerHeight-160);
+  tip.style.left = x+"px"; tip.style.top = y+"px";
+}
+
+// ── Selection ─────────────────────────────────────────────────────────────────
+
+nodeSel.on("click", (e,d) => { e.stopPropagation(); selectNode(d); });
+svgEl.addEventListener("click", e => { if (e.target === svgEl) clearSelect(); });
+
+function srcId(l) { return typeof l.source==="object" ? l.source.id : l.source; }
+function tgtId(l) { return typeof l.target==="object" ? l.target.id : l.target; }
+
+function selectNode(d) {
+  const nbrs = new Set();
+  links.forEach(l => {
+    if (srcId(l)===d.id) nbrs.add(tgtId(l));
+    if (tgtId(l)===d.id) nbrs.add(srcId(l));
+  });
+
+  nodeSel
+    .classed("lit",   n => n.id===d.id || nbrs.has(n.id))
+    .classed("ghost", n => n.id!==d.id && !nbrs.has(n.id));
+  linkSel
+    .classed("lit",   l => srcId(l)===d.id || tgtId(l)===d.id)
+    .classed("ghost", l => srcId(l)!==d.id && tgtId(l)!==d.id);
+
+  const comm = COMM_BY_ID.get(d.c);
+  const nbrList = [...nbrs];
+  document.getElementById("detail-panel").innerHTML = `
+    <div class="node-card">
+      <div class="nc-name" style="color:${getColor(d)}">${d.id}</div>
+      <div class="nc-meta">
+        ${d.t[0].toUpperCase()+d.t.slice(1)}
+        ${comm ? `&nbsp;·&nbsp;<span style="color:${comm.color}">${comm.title}</span>` : ""}
+      </div>
+      <div class="nc-desc">${d.d || "(no description)"}</div>
+      ${nbrList.length ? `
+      <div class="nc-connections">
+        <div class="section-label">Connected to (${nbrList.length})</div>
+        ${nbrList.map(n=>`<span class="chip" onclick="focusNode(${JSON.stringify(n)})">${n}</span>`).join("")}
+      </div>` : ""}
+    </div>
+  `;
+  // Hide the badge + answer when picking a node (local-style)
+  document.getElementById("mode-badge").style.display = "none";
+  document.getElementById("answer-wrap").classList.remove("show");
+}
+
+function focusNode(id) {
+  const d = nodes.find(n=>n.id===id);
+  if (d) selectNode(d);
+}
+
+function clearSelect() {
+  nodeSel.classed("lit",false).classed("ghost",false);
+  linkSel.classed("lit",false).classed("ghost",false);
+  document.getElementById("detail-panel").innerHTML =
+    '<p class="detail-empty">Click any node to explore its connections,<br>or click a community button below to see GraphRAG\'s summary of that cluster.</p>';
+}
+
+// ── Community filter ──────────────────────────────────────────────────────────
+
+function toggleComm(id) {
+  if (visibleComms.has(id)) {
+    if (visibleComms.size===1) return;
+    visibleComms.delete(id);
+  } else {
+    visibleComms.add(id);
+  }
+  document.getElementById(`cf-${id}`)?.classList.toggle("off", !visibleComms.has(id));
+  applyVisibility();
+}
+
+function applyVisibility() {
+  nodeSel.style("display", d => visibleComms.has(d.c) ? null : "none");
+  linkSel.style("display", l => {
+    const sc = nodes.find(n=>n.id===srcId(l))?.c;
+    const tc = nodes.find(n=>n.id===tgtId(l))?.c;
+    return visibleComms.has(sc) && visibleComms.has(tc) ? null : "none";
+  });
+}
+
+// ── Color mode ────────────────────────────────────────────────────────────────
+
+function setColorMode(mode) {
+  colorMode = mode;
+  document.getElementById("tog-comm").classList.toggle("on", mode==="community");
+  document.getElementById("tog-type").classList.toggle("on", mode==="type");
+  document.getElementById("comm-section").style.display = mode==="community" ? "block" : "none";
+  document.getElementById("type-section").style.display = mode==="type"      ? "block" : "none";
+  nodeSel.selectAll("circle")
+    .attr("fill",   d => getColor(d))
+    .attr("stroke", d => d3.color(getColor(d)).brighter(0.6));
+}
+
+// ── Pipeline step explainer ───────────────────────────────────────────────────
+
+function activateStep(s) {
+  if (activeStep===s.n) {
+    activeStep=null;
+    document.querySelectorAll(".step-card").forEach(el=>el.classList.remove("active"));
+    document.getElementById("step-banner").style.display="none";
+    return;
+  }
+  activeStep = s.n;
+  document.querySelectorAll(".step-card").forEach(el=>el.classList.remove("active"));
+  document.getElementById(`step-${s.n}`).classList.add("active");
+  const banner = document.getElementById("step-banner");
+  banner.innerHTML = s.banner;
+  banner.style.display = "block";
+
+  clearSelect();
+  if (s.n===2) setColorMode("type");
+  else         setColorMode("community");
+}
+
+// ── Show real community summary ───────────────────────────────────────────────
+
+function showCommunity(cid) {
+  const c = COMM_BY_ID.get(cid);
+  if (!c) return;
+
+  // Light up only this community's nodes + their internal edges.
+  const member = new Set(nodes.filter(n => n.c === cid).map(n => n.id));
+  nodeSel
+    .classed("lit",   n => member.has(n.id))
+    .classed("ghost", n => !member.has(n.id));
+  linkSel
+    .classed("lit",   l => member.has(srcId(l)) && member.has(tgtId(l)))
+    .classed("ghost", l => !(member.has(srcId(l)) && member.has(tgtId(l))));
+
+  const badge = document.getElementById("mode-badge");
+  badge.style.borderColor = c.color;
+  badge.style.color       = c.color;
+  badge.textContent = `● Community: ${c.title} (${member.size} entities)`;
+  badge.style.display = "block";
+
+  // Show the real community summary as the "answer".
+  const wrap = document.getElementById("answer-wrap");
+  const src  = document.getElementById("answer-source");
+  const txt  = document.getElementById("answer-text");
+  wrap.classList.add("show");
+  src.innerHTML = `<span style="color:${c.color}">● COMMUNITY SUMMARY</span> — generated by GraphRAG during indexing (Step 5)`;
+  txt.textContent = c.summary;
+
+  // Also populate the right panel with the community detail.
+  document.getElementById("detail-panel").innerHTML = `
+    <div class="comm-card">
+      <div class="nc-name" style="color:${c.color}">${c.title}</div>
+      <div class="nc-meta">${member.size} entities · Community ${c.id}</div>
+      <div class="nc-desc" style="max-height:340px;overflow-y:auto">${c.summary || "(no summary)"}</div>
+    </div>
+  `;
+}
+</script>
+</body>
+</html>

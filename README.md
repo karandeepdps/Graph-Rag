@@ -354,6 +354,47 @@ of the story — something classic RAG would struggle with.
 
 ## 6. Visualizing the Graph
 
+### Interactive Demo (uses YOUR real indexed graph)
+
+`demo.html` is an interactive D3.js visualization of your knowledge graph.
+After indexing, generate the data file once, then open the page:
+
+```bash
+python build_demo.py     # reads output/*.parquet → writes demo_data.js
+open demo.html           # macOS  (or: start demo.html / xdg-open demo.html)
+```
+
+Re-run `build_demo.py` any time you re-index to refresh the demo.
+
+What you can do in the demo:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│  LEFT SIDEBAR                                                       │
+│  • Toggle color by Community or Entity Type                         │
+│  • Filter graph to show/hide individual communities                 │
+│  • Click each Pipeline Step (1–6) for an explainer banner           │
+│                                                                     │
+│  GRAPH (center)                                                     │
+│  • Drag nodes to rearrange the layout                               │
+│  • Scroll to zoom in/out                                            │
+│  • Hover any node → tooltip with description                        │
+│  • Click a node → highlights its neighbors, fades the rest          │
+│                                                                     │
+│  RIGHT PANEL                                                        │
+│  • Shows the selected node's full description and connections       │
+│  • Click neighbor chips to jump to connected entities               │
+│                                                                     │
+│  BOTTOM QUERY BAR                                                   │
+│  • One button per community → highlights it and shows the REAL      │
+│    community summary GraphRAG generated for your data (Step 5)      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### Visualizing your own indexed graph
+
 After indexing, you have three options for seeing the graph visually.
 They go from "easiest" to "most powerful":
 
@@ -361,7 +402,7 @@ They go from "easiest" to "most powerful":
 ┌──────────────────────────────────────────────────────────────────────┐
 │  OPTION A — Interactive HTML (easiest, works in any browser)         │
 │  OPTION B — Gephi desktop app (best for large, complex graphs)       │
-│  OPTION C — Neo4j Browser (best for running graph queries visually)  │
+│  OPTION C — pandas in Python (no GUI, just data exploration)         │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
