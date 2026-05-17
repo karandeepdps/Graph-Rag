@@ -1,0 +1,21 @@
+The AI Ecosystem: Companies, Models, and Technologies
+
+OpenAI, founded in 2015 by Sam Altman, Elon Musk, Greg Brockman, and others, is the organization behind the GPT series of large language models. OpenAI released GPT-4 in March 2023, which became one of the most capable models available. Microsoft has a major strategic partnership with OpenAI, investing billions of dollars and integrating OpenAI models into products like Azure OpenAI Service, GitHub Copilot, and Microsoft 365 Copilot.
+
+Anthropic was founded in 2021 by Dario Amodei, Daniela Amodei, and other former OpenAI researchers. Anthropic developed the Claude family of models, with Claude 3 (Haiku, Sonnet, Opus) and Claude 4 (Haiku, Sonnet, Opus) being their flagship offerings. Anthropic focuses heavily on AI safety research and developed Constitutional AI as a training methodology. Google has invested significantly in Anthropic, and Amazon has also committed multi-billion dollar investments.
+
+Google DeepMind, formed from the merger of Google Brain and DeepMind in 2023, is behind the Gemini family of models. Gemini Ultra, Pro, and Nano represent different capability tiers. Google integrates Gemini into its search engine, Google Workspace, and the Vertex AI platform. DeepMind is also known for AlphaFold, a model that solved the protein folding problem.
+
+Meta AI released the Llama series of open-weight models, making them freely available for research and commercial use. Llama 2 and Llama 3 have been widely adopted by developers and companies building custom AI applications. Meta's open approach contrasts with the closed API approach of OpenAI and Anthropic.
+
+Mistral AI, a French startup founded by former DeepMind and Meta researchers, has developed highly efficient open models like Mistral 7B and Mixtral 8x7B. These models achieve strong performance with smaller parameter counts using techniques like grouped-query attention and sliding window attention.
+
+NVIDIA plays a critical role in the AI ecosystem as the dominant supplier of GPUs used for training and inference. The H100 and A100 GPUs are the workhorses of modern AI data centers. NVIDIA also develops CUDA, the parallel computing platform that most AI frameworks depend on. NVIDIA's partnership with Microsoft, Google, Amazon, and virtually every major AI company makes it a central node in the ecosystem.
+
+LangChain is an open-source framework that helps developers build applications using large language models. It provides abstractions for chains, agents, memory, and retrieval-augmented generation (RAG). LlamaIndex (formerly GPT Index) is another popular framework focused on data indexing and retrieval for LLMs.
+
+Microsoft GraphRAG is a system developed by Microsoft Research that uses knowledge graphs to enhance retrieval-augmented generation. Unlike traditional RAG which retrieves flat text chunks, GraphRAG builds a graph of entities and relationships from source documents and uses community detection algorithms to organize knowledge hierarchically. This enables answering complex, global questions about large document collections that standard RAG cannot handle.
+
+The Transformer architecture, introduced in the paper "Attention Is All You Need" by Vaswani et al. at Google in 2017, is the foundational architecture for virtually all modern large language models. Transformers use self-attention mechanisms to process sequences in parallel, enabling efficient training on massive datasets.
+
+Retrieval-Augmented Generation (RAG) was introduced by Facebook AI Research in 2020. RAG combines a retrieval system with a generative model, allowing LLMs to access external knowledge without retraining. Vector databases like Pinecone, Weaviate, Chroma, and pgvector are commonly used in RAG pipelines to store and retrieve embeddings.

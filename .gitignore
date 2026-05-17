@@ -1,0 +1,26 @@
+# Environment
+.env
+
+# GraphRAG outputs (large, auto-generated)
+output/
+cache/
+logs/
+ragtest/output/
+ragtest/cache/
+ragtest/logs/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Parquet & artifacts
+*.parquet
+
+# OS
+.DS_Store
