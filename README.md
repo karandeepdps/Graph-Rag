@@ -22,7 +22,8 @@ auto-generated cluster summaries. No setup required — runs straight in your br
 8. [Local vs Global Search — When to Use Which](#8-local-vs-global-search--when-to-use-which)
 9. [Configuration Guide](#9-configuration-guide)
 10. [Add Your Own Documents](#10-add-your-own-documents)
-11. [Resources](#11-resources)
+11. [Going to Production](#11-going-to-production)
+12. [Resources](#12-resources)
 
 ---
 
@@ -828,7 +829,245 @@ trafilatura --url "https://example.com/article" > input/article.txt
 
 ---
 
-## 11. Resources
+## 11. Going to Production
+
+A laptop running `python query.py` is great for learning. Once real users start
+asking questions you'll hit four bottlenecks: **cold start, vector latency,
+LLM throughput, and storage durability**. This section explains *why* GraphRAG
+splits storage into separate layers and *what to put in each layer* on AWS,
+Azure, GCP, or a self-hosted setup.
+
+### Why GraphRAG has multiple storage layers
+
+When indexing finishes, GraphRAG writes four very different kinds of data:
+
+```
+┌───────────────────────────────────────────────────────────────────────┐
+│  output/                                                              │
+│   ├── entities.parquet         ← columnar tables (millions of rows)   │
+│   ├── relationships.parquet                                           │
+│   ├── communities.parquet                                             │
+│   ├── community_reports.parquet ← long-form text blobs (paragraphs)   │
+│   ├── text_units.parquet       ← raw chunks (rarely read after index) │
+│   └── lancedb/                 ← vector embeddings (similarity search)│
+│  cache/                        ← LLM response cache (deduplicates)    │
+└───────────────────────────────────────────────────────────────────────┘
+```
+
+Each one has a completely different **access pattern** — that's why production
+systems don't stuff them into one database:
+
+| Data | Access pattern | What it needs |
+|---|---|---|
+| **Vector embeddings** | Approximate nearest-neighbor search at query time | Specialized ANN index (HNSW, IVF). Latency-critical. |
+| **Graph artifacts** (parquet) | Bulk reads when the API starts; rare writes | Columnar storage. Throughput > latency. |
+| **Community reports** | Read N reports per global query as long text blobs | Document store or blob storage. Read-heavy. |
+| **LLM cache** | Hash-keyed reads to skip duplicate LLM calls | Key-value store with TTL. Saves 80%+ on re-indexing. |
+
+Forcing all four into Postgres "works" up to ~100k entities, but each layer is
+sub-optimal for the others' workloads. Splitting them lets you scale and
+operate each independently — and pick a managed service for each.
+
+### The 4-layer production architecture
+
+```
+                            ┌──────────────────────┐
+                            │   API service        │
+                            │  (FastAPI / Express) │
+                            └────────┬─────────────┘
+                                     │
+       ┌────────────┬────────────────┼────────────────┬────────────┐
+       ▼            ▼                ▼                ▼            ▼
+  ┌─────────┐  ┌─────────┐    ┌─────────────┐   ┌──────────┐  ┌────────┐
+  │ Vector  │  │ Object  │    │ Document /  │   │  Cache   │  │  LLM   │
+  │  store  │  │ storage │    │ Graph DB    │   │ (Redis)  │  │ (API)  │
+  └─────────┘  └─────────┘    └─────────────┘   └──────────┘  └────────┘
+   entity        parquet       community           LLM         answer
+   embeddings    artifacts     reports             cache       generation
+```
+
+### Cloud-by-cloud deployment options
+
+#### AWS
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│  Client → API Gateway → ECS Fargate (FastAPI + GraphRAG)           │
+│                                │                                   │
+│                                ├─→ S3                ← parquet     │
+│                                ├─→ OpenSearch        ← vectors     │
+│                                ├─→ DynamoDB          ← reports     │
+│                                ├─→ ElastiCache Redis ← LLM cache   │
+│                                └─→ Bedrock           ← LLM         │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+| Layer | AWS service | Why |
+|---|---|---|
+| Vector store | **OpenSearch Service** (k-NN) | Managed HNSW, scales to billions, hybrid search. |
+| | **Aurora / RDS + pgvector** | Cheaper for <5M vectors; SQL filters. |
+| | **MemoryDB for Redis** (vector) | Lowest latency; doubles as cache. |
+| Object storage | **S3** | Cheap, durable, GraphRAG can read parquet directly. |
+| Document store | **DynamoDB** or **S3** | DynamoDB if you need low-latency per-community reads. |
+| Cache | **ElastiCache for Redis** | Standard. |
+| LLM | **Bedrock** (Claude / Llama / Titan) | One API, no key management. |
+| Compute | **ECS Fargate** or **App Runner** | Long-running container; avoids Lambda cold starts. |
+
+**Gotchas on AWS:**
+- GraphRAG doesn't ship an OpenSearch adapter natively — use **pgvector on Aurora**, or write a ~150-line custom `VectorStore` adapter.
+- Bedrock isn't OpenAI-compatible. Easiest fix: run **[LiteLLM Proxy](https://github.com/BerriAI/litellm)** as a shim and point `llm.api_base` at it. No GraphRAG code changes.
+- Don't use Lambda for the query path — parquet reload per cold start kills latency.
+
+#### Azure (Microsoft's reference architecture)
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│  Client → APIM → Container Apps (FastAPI + GraphRAG)               │
+│                       │                                            │
+│                       ├─→ Azure Blob Storage      ← parquet        │
+│                       ├─→ Azure AI Search         ← vectors        │
+│                       ├─→ Cosmos DB               ← reports/state  │
+│                       └─→ Azure OpenAI            ← LLM            │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+| Layer | Azure service | Why |
+|---|---|---|
+| Vector store | **Azure AI Search** | First-class GraphRAG support out of the box. |
+| Object storage | **Blob Storage** | Native parquet support in GraphRAG. |
+| Document store | **Cosmos DB** | Globally distributed; first-class GraphRAG support. |
+| Cache | **Azure Cache for Redis** | Standard. |
+| LLM | **Azure OpenAI** | gpt-4o + embeddings; same API as `openai.com`. |
+| Compute | **Container Apps** | Auto-scaling containers. |
+
+**Zero-friction path:** the official [**GraphRAG Accelerator**](https://github.com/Azure-Samples/graphrag-accelerator) is a one-click Bicep deployment of the above. If you don't have a strong cloud preference, this is the fastest production start.
+
+#### GCP
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│  Client → Cloud Load Balancer → Cloud Run (FastAPI + GraphRAG)     │
+│                                     │                              │
+│                                     ├─→ GCS                ← parquet│
+│                                     ├─→ Vertex AI Vector    ← vectors│
+│                                     │     Search                   │
+│                                     ├─→ Firestore          ← reports│
+│                                     ├─→ Memorystore Redis  ← cache  │
+│                                     └─→ Vertex AI Gemini   ← LLM   │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+| Layer | GCP service | Why |
+|---|---|---|
+| Vector store | **Vertex AI Vector Search** | Managed ScaNN; sub-10ms latency at scale. |
+| | **Cloud SQL + pgvector** | Cheaper for small corpora. |
+| Object storage | **Cloud Storage (GCS)** | Standard. |
+| Document store | **Firestore** | NoSQL; pay-per-read fits low-QPS report lookups. |
+| Cache | **Memorystore for Redis** | Standard. |
+| LLM | **Vertex AI** (Gemini / Claude on Vertex) | Or use Anthropic API directly. |
+| Compute | **Cloud Run** | Serverless containers; min-instances=1 to avoid cold starts. |
+
+**Note:** GraphRAG has no native Vertex Vector Search adapter — use pgvector or write a thin adapter. For Gemini, LiteLLM Proxy works the same way as on AWS.
+
+#### Self-hosted / cloud-agnostic
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│  Client → Caddy/Nginx → FastAPI (in Docker / Kubernetes)           │
+│                              │                                     │
+│                              ├─→ MinIO or local FS   ← parquet     │
+│                              ├─→ Qdrant              ← vectors     │
+│                              ├─→ Postgres            ← reports     │
+│                              ├─→ Redis               ← cache       │
+│                              └─→ Ollama / vLLM       ← LLM         │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+| Layer | Self-hosted option | Why |
+|---|---|---|
+| Vector store | **Qdrant** | Fast, great filtering, single binary. |
+| | **Weaviate** or **Milvus** | If you need clustering/replication. |
+| | **Postgres + pgvector** | Simplest if you already run Postgres. |
+| Object storage | **MinIO** (S3-compatible) | Same API as S3 for GraphRAG. |
+| Document store | **Postgres** | One database for reports + state. |
+| Cache | **Redis** | Standard. |
+| LLM | **Ollama** (llama3.1 / qwen2.5) or **vLLM** | Fully offline; quality < gpt-4o. |
+| Compute | **Docker Compose** or **Kubernetes** | Your choice. |
+
+This is the right pick when data can't leave your VPC (compliance / on-prem).
+
+### Recommended starter stacks (cheapest "good enough")
+
+| Goal | Stack | Monthly cost |
+|---|---|---|
+| **Demo for stakeholders** | Single Aurora Serverless v2 (pgvector) + S3 + App Runner + Bedrock Claude Haiku | $30–80 |
+| **Internal tool, <1k queries/day** | Same as above with ElastiCache + Bedrock Claude Sonnet | $100–250 |
+| **Customer-facing, <100k queries/day** | OpenSearch + S3 + DynamoDB + Redis + ECS Fargate + Bedrock | $500–1500 |
+| **Fully offline / compliance** | Qdrant + MinIO + Postgres + Redis + Ollama (on 1 GPU node) | hardware-only |
+
+### What changes in your `settings.yml`
+
+GraphRAG supports the storage backend swap declaratively in [settings.yml](settings.yml):
+
+```yaml
+# Local development (current setup)
+vector_store:
+  type: lancedb
+  db_uri: "output/lancedb"
+
+# Production on Azure
+vector_store:
+  type: azure_ai_search
+  url: "https://my-search.search.windows.net"
+  api_key: ${AZURE_SEARCH_KEY}
+
+# Production with custom adapter (Qdrant, OpenSearch, Pinecone)
+vector_store:
+  type: "my_company.vector.qdrant_store"   # dotted import path
+  collection_name: "graphrag_entities"
+```
+
+For LLM swap (e.g. to Bedrock via LiteLLM):
+
+```yaml
+llm:
+  type: openai_chat
+  api_base: "http://litellm-proxy:4000/v1"   # LiteLLM shim
+  model: "anthropic.claude-sonnet-4-6"
+  api_key: ${LITELLM_KEY}
+```
+
+The graph itself is portable — once indexed, you can move the parquet files to
+any backend without re-running the LLM-heavy indexing step.
+
+### One concrete next step
+
+The single biggest perceived-latency win, before swapping any backends, is
+**stop spawning a new Python process per query.** Wrap the existing query logic
+in a FastAPI service so the parquet + LanceDB load once at startup:
+
+```python
+# server.py (sketch)
+from fastapi import FastAPI
+from graphrag.query import GlobalSearch, LocalSearch  # already in your venv
+
+app = FastAPI()
+local  = LocalSearch.from_config("./settings.yml")   # loads once
+global_= GlobalSearch.from_config("./settings.yml")  # loads once
+
+@app.get("/query")
+def query(q: str, method: str = "local"):
+    engine = local if method == "local" else global_
+    return engine.search(q)
+```
+
+Run it with `uvicorn server:app --workers 4` and you've removed ~3 seconds of
+cold start per query — usually enough to defer the whole "should I move to
+OpenSearch?" question by another six months.
+
+---
+
+## 12. Resources
 
 | Resource | URL |
 |---|---|
