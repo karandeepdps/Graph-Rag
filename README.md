@@ -3,6 +3,11 @@
 > A hands-on, illustrated guide to [Microsoft GraphRAG](https://github.com/microsoft/graphrag).
 > No prior graph database knowledge needed.
 
+### 🚀 [Open the Live Interactive Demo →](https://karandeepdps.github.io/Graph-Rag/demo.html)
+
+Click any node to explore, toggle community coloring, and read GraphRAG's
+auto-generated cluster summaries. No setup required — runs straight in your browser.
+
 ---
 
 ## Table of Contents
